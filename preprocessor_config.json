@@ -1,0 +1,11 @@
+{
+  "feature_extractor_type": "OmniASRFeatureExtractor",
+  "processor_class": "OmniASRProcessor",
+  "sampling_rate": 16000,
+  "feature_size": 1,
+  "padding_value": 0.0,
+  "auto_map": {
+    "AutoFeatureExtractor": "processing_omniasr.OmniASRFeatureExtractor",
+    "AutoProcessor": "processing_omniasr.OmniASRProcessor"
+  }
+}

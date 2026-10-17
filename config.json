@@ -73,5 +73,9 @@
   "pad_token_id": 1,
   "torch_dtype": "float32",
   "transformers_version": "4.52.0",
-  "lid_marker_token_id": 9812
+  "lid_marker_token_id": 9812,
+  "auto_map": {
+    "AutoConfig": "configuration_omniasr.OmniASRConfig",
+    "AutoModel": "modeling_omniasr.OmniAsrForConditionalGeneration"
+  }
 }
