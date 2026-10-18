@@ -66,7 +66,7 @@ class OmniASRConfig(PreTrainedConfig):
                 "intermediate_size": 2816,
                 "max_position_embeddings": 8192,
                 "rope_theta": 10000.0,
-                "vocab_size": 9813,
+                "vocab_size": 9812,
                 "rms_norm_eps": 1e-05,
             }
         if isinstance(text_config, dict):

@@ -87,7 +87,8 @@ def group(key):
 
 def main(out_path):
     src_dir = snapshot_download(SRC_REPO, allow_patterns=["*.safetensors", "config.json"])
-    text_cfg = json.load(open(f"{src_dir}/config.json"))["text_config"]
+    src_cfg = json.load(open(f"{src_dir}/config.json"))
+    text_cfg = src_cfg["text_config"]
     rope_heads = {
         "q_proj": text_cfg["num_attention_heads"],
         "k_proj": text_cfg["num_key_value_heads"],
@@ -107,9 +108,17 @@ def main(out_path):
         assert torch.allclose(w.norm(dim=(0, 1)), g.abs().flatten(), rtol=1e-4), "weight_norm fold mismatch"
         out["model.audio_tower." + POS_CONV + "weight"] = w.contiguous()
 
-        # 2. everything else
+        # 2. text_frontend -> embed_tokens (regular tokens) + lid_embedding (LID marker row),
+        #    so embed_tokens and lm_head have the same vocab size
+        emb = f.get_tensor("text_frontend.weight")
+        lid = src_cfg["lid_marker_token_id"]
+        assert lid == emb.shape[0] - 1, "LID marker must be the last embedding row"
+        out["model.language_model.embed_tokens.weight"] = emb[:lid].clone()
+        out["model.lid_embedding.weight"] = emb[lid:].clone()
+
+        # 3. everything else
         for name in names:
-            if name in (POS_CONV + "weight_g", POS_CONV + "weight_v"):
+            if name in (POS_CONV + "weight_g", POS_CONV + "weight_v", "text_frontend.weight"):
                 continue
             orig = f.get_tensor(name)
             new_name, new, heads = convert(name, orig, rope_heads)
@@ -122,7 +131,7 @@ def main(out_path):
             out[new_name] = new.contiguous()
 
     n_layers = text_cfg["num_hidden_layers"]
-    assert len(out) == EXPECTED_SRC - 1, f"{len(out)} converted, expected {EXPECTED_SRC - 1}"
+    assert len(out) == EXPECTED_SRC, f"{len(out)} converted, expected {EXPECTED_SRC}"
     assert n_permuted >= 2 * n_layers, f"permuted {n_permuted} tensors, expected >= {2 * n_layers}"
 
     save_file(out, out_path, metadata={"format": "pt"})

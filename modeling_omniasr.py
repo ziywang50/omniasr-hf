@@ -213,6 +213,9 @@ class OmniAsrModel(OmniAsrPreTrainedModel):
             config.encoder_embed_dim * config.encoder_stacking, config.projection_dim, bias=True
         )
         self.lang_embeddings = nn.Embedding(config.num_languages, config.text_config.hidden_size)
+        # LID marker embedding, kept outside embed_tokens so that embed_tokens and
+        # lm_head share the same vocab size (required by the vLLM Transformers backend).
+        self.lid_embedding = nn.Embedding(1, config.text_config.hidden_size)
         self.language_model = LlamaModel(config.text_config)
         self.post_init()
 
@@ -225,7 +228,6 @@ class OmniAsrModel(OmniAsrPreTrainedModel):
         if input_features.dim() == 1:
             input_features = input_features[None]
         stacking = self.config.encoder_stacking
-        embed_tokens = self.language_model.embed_tokens
         outputs = []
         for i, wav in enumerate(input_features):
             x = self.audio_tower(wav[None])                       # [1, T, E]
@@ -235,7 +237,7 @@ class OmniAsrModel(OmniAsrPreTrainedModel):
                     x = F.pad(x, (0, 0, 0, pad))
                 x = x.reshape(1, x.size(1) // stacking, x.size(2) * stacking)
             x = self.multi_modal_projector(x)[0]                  # [N, hidden]
-            lid = embed_tokens(torch.tensor([self.config.lid_marker_token_id], device=x.device))
+            lid = self.lid_embedding.weight                       # [1, hidden]
             lang = self.lang_embeddings(language_ids[i].reshape(1).to(x.device))
             outputs.append(torch.cat([x, lid.to(x.dtype), lang.to(x.dtype)], dim=0))
         return outputs
