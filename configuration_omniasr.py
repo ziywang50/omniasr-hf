@@ -38,6 +38,7 @@ class OmniASRConfig(PreTrainedConfig):
         pad_token_id: int = 1,
         lid_marker_token_id: int = 9812,
         encoder_stacking: int = 1,
+        max_source_positions: int | None = None,
         **kwargs,
     ):
         self.sampling_rate = sampling_rate
@@ -79,6 +80,14 @@ class OmniASRConfig(PreTrainedConfig):
         self.num_languages = num_languages
         self.lid_marker_token_id = lid_marker_token_id
         self.encoder_stacking = encoder_stacking
+        if max_source_positions is None:
+            # Placeholder tokens for the longest clip (40 s): CNN frames,
+            # ceil-divided by encoder_stacking, plus the LID and language slots.
+            n = 40 * sampling_rate
+            for _out_ch, kernel_size, stride in self.feature_extractor_layer_descs:
+                n = (n - kernel_size) // stride + 1
+            max_source_positions = -(-n // encoder_stacking) + 2
+        self.max_source_positions = max_source_positions
 
         super().__init__(
             bos_token_id=bos_token_id,
