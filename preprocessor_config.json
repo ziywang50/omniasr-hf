@@ -7,5 +7,43 @@
   "auto_map": {
     "AutoFeatureExtractor": "processing_omniasr.OmniASRFeatureExtractor",
     "AutoProcessor": "processing_omniasr.OmniASRProcessor"
-  }
+  },
+  "conv_layer_descs": [
+    [
+      512,
+      10,
+      5
+    ],
+    [
+      512,
+      3,
+      2
+    ],
+    [
+      512,
+      3,
+      2
+    ],
+    [
+      512,
+      3,
+      2
+    ],
+    [
+      512,
+      3,
+      2
+    ],
+    [
+      512,
+      2,
+      2
+    ],
+    [
+      512,
+      2,
+      2
+    ]
+  ],
+  "encoder_stacking": 1
 }
