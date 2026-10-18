@@ -5,7 +5,7 @@ import re
 
 import soundfile as sf
 import torch
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 
 def words(s):
@@ -23,7 +23,7 @@ def edit_distance(a, b):
 
 
 d = "/root/autodl-tmp/omniasr-hf"
-model = AutoModel.from_pretrained(d, trust_remote_code=True, dtype=torch.bfloat16).to("cuda").eval()
+model = AutoModelForCausalLM.from_pretrained(d, trust_remote_code=True, dtype=torch.bfloat16).to("cuda").eval()
 proc = AutoProcessor.from_pretrained(d, trust_remote_code=True)
 meta = json.load(open("/root/autodl-tmp/bench_audio/manifest.json"))
 vllm_out = json.load(open("/root/autodl-tmp/vllm_out.json"))

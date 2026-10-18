@@ -76,6 +76,7 @@
   "lid_marker_token_id": 9812,
   "auto_map": {
     "AutoConfig": "configuration_omniasr.OmniASRConfig",
-    "AutoModel": "modeling_omniasr.OmniAsrForConditionalGeneration"
+    "AutoModel": "modeling_omniasr.OmniAsrModel",
+    "AutoModelForCausalLM": "modeling_omniasr.OmniAsrForConditionalGeneration"
   }
 }

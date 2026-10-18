@@ -2,10 +2,10 @@ import json
 
 import soundfile as sf
 import torch
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 d = "/root/autodl-tmp/omniasr-hf"
-model, info = AutoModel.from_pretrained(d, trust_remote_code=True, dtype=torch.bfloat16,
+model, info = AutoModelForCausalLM.from_pretrained(d, trust_remote_code=True, dtype=torch.bfloat16,
                                         output_loading_info=True)
 print(type(model).__name__, "| loading issues:", {k: v for k, v in info.items() if v} or "none")
 model = model.to("cuda").eval()

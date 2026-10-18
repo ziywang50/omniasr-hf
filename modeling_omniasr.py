@@ -179,7 +179,7 @@ class OmniAsrAudioTower(nn.Module):
 # Full model: audio tower + projector + LID/language embeddings + LLaMA decoder
 # ---------------------------------------------------------------------------
 from transformers import GenerationMixin, LlamaModel, PreTrainedModel  # noqa: E402
-from transformers.modeling_outputs import CausalLMOutputWithPast  # noqa: E402
+from transformers.modeling_outputs import BaseModelOutputWithPooling, CausalLMOutputWithPast  # noqa: E402
 
 
 class OmniAsrPreTrainedModel(PreTrainedModel):
@@ -222,9 +222,11 @@ class OmniAsrModel(OmniAsrPreTrainedModel):
     def get_input_embeddings(self):
         return self.language_model.embed_tokens
 
-    def get_audio_features(self, input_features, language_ids):
+    def get_audio_features(self, input_features, language_ids=None, return_dict=False, **kwargs):
         """One clip at a time (the encoder has no padding mask).
         Returns a list of [N_i + 2, hidden]: audio frames, LID marker, language."""
+        if language_ids is None:
+            raise ValueError("language_ids is required (produced by OmniASRProcessor)")
         if input_features.dim() == 1:
             input_features = input_features[None]
         stacking = self.config.encoder_stacking
@@ -240,6 +242,8 @@ class OmniAsrModel(OmniAsrPreTrainedModel):
             lid = self.lid_embedding.weight                       # [1, hidden]
             lang = self.lang_embeddings(language_ids[i].reshape(1).to(x.device))
             outputs.append(torch.cat([x, lid.to(x.dtype), lang.to(x.dtype)], dim=0))
+        if return_dict:
+            return BaseModelOutputWithPooling(pooler_output=torch.cat(outputs, dim=0))
         return outputs
 
     def forward(self, input_ids=None, input_features=None, language_ids=None,
@@ -273,8 +277,8 @@ class OmniAsrForConditionalGeneration(OmniAsrPreTrainedModel, GenerationMixin):
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()
 
-    def get_audio_features(self, input_features, language_ids):
-        return self.model.get_audio_features(input_features, language_ids)
+    def get_audio_features(self, input_features, language_ids=None, **kwargs):
+        return self.model.get_audio_features(input_features, language_ids, **kwargs)
 
     def forward(self, input_ids=None, input_features=None, language_ids=None,
                 attention_mask=None, position_ids=None, past_key_values=None,
