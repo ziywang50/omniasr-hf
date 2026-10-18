@@ -1,206 +1,84 @@
 ---
 license: apache-2.0
+library_name: transformers
+pipeline_tag: automatic-speech-recognition
 datasets:
 - facebook/omnilingual-asr-corpus
-pipeline_tag: automatic-speech-recognition
 tags:
-- vllm
 - speech-recognition
 - omniasr
+- custom_code
 base_model: facebook/omniASR-LLM-300M
 ---
 
-# omniASR-LLM-300M — vLLM-Compatible Fork
+# omniASR-LLM-300M — Transformers port (remote code)
 
-> HuggingFace-compatible fork of [facebook/omniASR-LLM-300M](https://huggingface.co/facebook/omniASR-LLM-300M), converted for [vLLM](https://github.com/vllm-project/vllm) integration.  
-> **Model weights are identical to the original.** Only the packaging has changed.
+A Transformers-compatible port of Meta's [Omnilingual ASR](https://github.com/facebookresearch/omnilingual-asr)
+LLM 300M model ([facebook/omniASR-LLM-300M](https://huggingface.co/facebook/omniASR-LLM-300M)),
+which is released for fairseq2 only. This repository adds Transformers modeling, config and
+processor code so the model loads with `AutoModel` / `AutoProcessor`.
 
-## What Changed
-
-| Change | Reason |
-|--------|--------|
-| Added `config.json` (OmniASRConfig format) | Original has no HuggingFace config; vLLM needs one |
-| Added `tokenizer_config.json` | HuggingFace tokenizer auto-detection |
-| Added `lang_lookup.json` | Language ID lookup table for multi-language support |
-| Converted checkpoint to `model.safetensors` | vLLM requires safetensors format |
-| Renamed `omniASR_tokenizer.model` → `tokenizer.model` | HuggingFace tokenizer convention |
-| Removed `omniASR-LLM-300M.pt` | Redundant with safetensors; saves ~6.5 GB |
-
-## Usage with vLLM
-
-**Start the server:**
-
-```bash
-vllm serve ziywang50/omniASR-LLM-300M \
-    --enforce-eager \
-    --dtype bfloat16 \
-    --attention-backend TRITON_ATTN
-```
-
-> **Note:** `--attention-backend TRITON_ATTN` is required because OmniASR's decoder uses `head_dim=512`, which exceeds FlashAttention's supported range.
-
-**Transcribe audio (OpenAI-compatible API):**
+## Usage
 
 ```python
-from openai import OpenAI
+import soundfile as sf
+import torch
+from transformers import AutoModel, AutoProcessor
 
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="dummy")
+repo = "ziywang50/omniASR-LLM-300M-hf"
+model = AutoModel.from_pretrained(repo, trust_remote_code=True, dtype=torch.bfloat16).to("cuda").eval()
+processor = AutoProcessor.from_pretrained(repo, trust_remote_code=True)
 
-with open("audio.wav", "rb") as f:
-    result = client.audio.transcriptions.create(
-        model="ziywang50/omniASR-LLM-300M",
-        file=f,
-        language="en",  # optional: ISO-639-1 or OmniASR native code (e.g., "eng_Latn")
-    )
-print(result.text)
+audio, sr = sf.read("audio.wav", dtype="float32")          # 16 kHz mono, up to 40 s
+inputs = processor(audio=audio, sampling_rate=sr, language="eng_Latn").to("cuda")
+out = model.generate(**inputs, max_new_tokens=256, do_sample=False, pad_token_id=1, eos_token_id=2)
+print(processor.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0])
 ```
 
-## Other Variants
+`language` accepts OmniASR codes (e.g. `eng_Latn`, `deu_Latn`) or ISO 639-1 codes for
+common languages (e.g. `en`, `de`). The full list is in `lang_lookup.json`.
 
-| Variant | Fork | Status |
-|---------|------|--------|
-| 300M | [ziywang50/omniASR-LLM-300M](https://huggingface.co/ziywang50/omniASR-LLM-300M) | ✅ Tested |
-| 1B | [ziywang50/omniASR-LLM-1B](https://huggingface.co/ziywang50/omniASR-LLM-1B) | ✅ Tested |
-| 3B | [ziywang50/omniASR-LLM-3B](https://huggingface.co/ziywang50/omniASR-LLM-3B) | ✅ Tested |
-| 7B | [ziywang50/omniASR-LLM-7B](https://huggingface.co/ziywang50/omniASR-LLM-7B) | ✅ Tested |
+## Verification
 
-All forks are part of [vLLM PR #36864](https://github.com/vllm-project/vllm/pull/36864) adding OmniASR support to vLLM.
+Evaluated on the 73 clips of `hf-internal-testing/librispeech_asr_dummy` (clean/validation),
+bf16, greedy decoding:
 
----
+| | Result |
+|---|---|
+| Transcripts identical to the native vLLM implementation ([vllm#36864](https://github.com/vllm-project/vllm/pull/36864)) | 73 / 73 |
+| WER, this port | 7.04% |
+| WER, native vLLM implementation | 7.04% |
 
-# Original Model Card
+The native vLLM implementation was itself validated against Meta's `omnilingual-asr`
+reference pipeline on the same clips (WER 7.04% for both).
 
-*Everything below is from the [original facebook/omniASR-LLM-300M](https://huggingface.co/facebook/omniASR-LLM-300M) model card.*
+## What the conversion changes
 
-# Omnilingual ASR: Open-Source Multilingual Speech Recognition for 1600+ Languages
+The weights are a mathematically equivalent re-layout of the original checkpoint
+(see `convert_weights.py`):
 
-<div align="center" style="lline-height: 1.2; font-size:16px; margin-bottom: 30px;">
-  <a href="https://huggingface.co/facebook" target="_blank" style="margin: 2px;">
-    🤗 Hugging Face 
-  </a> | 
-  <a href="https://github.com/facebookresearch/omnilingual-asr" target="_blank" style="margin: 2px;">
-    🐙 GitHub
-  </a> | 
-  <a href="https://huggingface.co/spaces/facebook/omniasr-transcriptions" target="_blank" style="margin: 2px;">
-    🤖️ Demo
-  </a> | 
-  <a href="https://ai.meta.com/research/publications/omnilingual-asr-open-source-multilingual-speech-recognition-for-1600-languages/" target="_blank" style="margin: 2px;">
-    📃 Paper
-  </a> | 
-  <a href="https://ai.meta.com/blog/omnilingual-asr-advancing-automatic-speech-recognition/" target="_blank" style="margin: 2px;">
-    📝 Blogpost
-  </a> | 
-  <a href="https://github.com/facebookresearch/omnilingual-asr/blob/main/LICENSE" style="margin: 2px;">
-    📄 License: Apache 2.0
-  </a>
-</div>
+- Parameter names are mapped from fairseq2 to a Transformers layout; the decoder is a
+  standard `LlamaModel`.
+- Decoder `q_proj` / `k_proj` rows are permuted from the GPT-J (interleaved) RoPE layout to
+  the NeoX (half-split) layout used by Transformers' Llama, so the standard RoPE reproduces
+  the original model.
+- The `weight_norm` on the encoder's positional convolution is folded into a plain
+  `Conv1d` weight.
 
-# Model Card for omniASR-LLM-300M
+## Limitations
 
-## Model Description
+- One audio clip per call (the encoder has no padding mask yet).
+- Clips up to 40 s, as for the original LLM models. Long-form audio needs the Unlimited
+  variants, which are not ported.
+- Only English was evaluated here.
+- vLLM support through the Transformers backend is work in progress.
 
-This model is part of the **Omnilingual ASR** family released by Meta AI. The original suite includes:
+Tested with `transformers==5.15.1`, `torch==2.13.0`.
 
-<!-- TODO : add new tokenizer, we'll get two tokenizer, add mssing speed numbers-->
-| Model Name          | Features      | Parameters | Download Size (FP32) | Inference VRAM¹ | Real-Time Factor¹ (relative speed)² |
-|---------------------|---------------|------------:|---------------:|---------------:|-----------:|
-| [`omniASR_W2V_300M`](https://huggingface.co/facebook/omniASR-W2V-300M)      | SSL  | 317_390_592   | 1.2 GiB | | |
-| [`omniASR_W2V_1B`](https://huggingface.co/facebook/omniASR-W2V-1B)          | SSL  | 965_514_752   | 3.6 GiB | | |
-| [`omniASR_W2V_3B`](https://huggingface.co/facebook/omniASR-W2V-3B)          | SSL  | 3_064_124_672 | 12.0 GiB | | |
-| [`omniASR_W2V_7B`](https://huggingface.co/facebook/omniASR-W2V-7B)          | SSL  | 6_488_487_168 | 25.0 GiB | | |
-| [`omniASR_CTC_300M`](https://huggingface.co/facebook/omniASR-CTC-300M)      | ASR  | 325_494_996   | 1.3 GiB   | ~2 GiB  | 0.001 (96x) |
-| [`omniASR_CTC_1B`](https://huggingface.co/facebook/omniASR-CTC-1B)          | ASR  | 975_065_300   | 3.7 GiB   | ~3 GiB  | 0.002 (48x) |
-| [`omniASR_CTC_3B`](https://huggingface.co/facebook/omniASR-CTC-3B)          | ASR  | 3_080_423_636 | 12.0 GiB  | ~8 GiB  | 0.003 (32x) |
-| [`omniASR_CTC_7B`](https://huggingface.co/facebook/omniASR-CTC-7B)          | ASR  | 6_504_786_132 | 25.0 GiB  | ~15 GiB | 0.006 (16x) |
-| [`omniASR_LLM_300M`](https://huggingface.co/facebook/omniASR-LLM-300M)      | ASR with optional language conditioning  | 1_627_603_584 | 6.1 GiB   | ~5 GiB  | 0.090 (~1x) |
-| [`omniASR_LLM_1B`](https://huggingface.co/facebook/omniASR-LLM-1B)          | ASR with optional language conditioning  | 2_275_710_592 | 8.5 GiB   | ~6 GiB  | 0.091 (~1x) |
-| [`omniASR_LLM_3B`](https://huggingface.co/facebook/omniASR-LLM-3B)          | ASR with optional language conditioning  | 4_376_679_040 | 17.0 GiB  | ~10 GiB | 0.093 (~1x) |
-| [`omniASR_LLM_7B`](https://huggingface.co/facebook/omniASR-LLM-7B)          | ASR with optional language conditioning  | 7_801_041_536 | 30.0 GiB  | ~17 GiB | 0.092 (~1x) |
-| [`omniASR_LLM_7B_ZS`](https://huggingface.co/facebook/omniASR-LLM-7B-ZS)    | Zero-Shot ASR | 7_810_900_608 | 30.0 GiB | ~20 GiB | 0.194 (~0.5x) |
+## Credits
 
+The model was developed by Meta FAIR (Omnilingual ASR). This repository only repackages the
+weights and adds Transformers code. Parts of the modeling and conversion code were written
+with AI assistance (Claude); all results above come from actual runs.
 
-¹ (batch=1, audio_len=30s, BF16, A100)
-
-² Relative speed to `omniASR_LLM_7B`
-
----
-
-## Installation
-
-The models were developed using [fairseq2](https://github.com/facebookresearch/fairseq2), a research-focused sequence modeling toolkit. While we provide a **reference** inference pipeline that works across platforms, audio support requires [libsndfile](https://github.com/facebookresearch/fairseq2?tab=readme-ov-file#system-dependencies) (Mac: `brew install libsndfile`; Windows may need an additional [setup](https://github.com/facebookresearch/fairseq2?tab=readme-ov-file#installing-on-windows)).
-
-```bash
-# using pip
-pip install omnilingual-asr
-
-# using uv
-uv add omnilingual-asr
-```
-
-
-## Inference
-
-```python
-from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
-
-pipeline = ASRInferencePipeline(model_card="omniASR_LLM_7B")
-
-audio_files = ["/path/to/eng_audio1.flac", "/path/to/deu_audio2.wav"]
-lang = ["eng_Latn", "deu_Latn"]
-transcriptions = pipeline.transcribe(audio_files, lang=lang, batch_size=2)
-```
-
-## Supported Languages
-
-To view the full list of 1600+ supported languages, you can access the language list [programmatically](/src/omnilingual_asr/models/wav2vec2_llama/lang_ids.py):
-
-```python
-from omnilingual_asr.models.wav2vec2_llama.lang_ids import supported_langs
-
-# Print all supported languages
-print(f"Total supported languages: {len(supported_langs)}")
-print(supported_langs)
-
-# Check if a specific language is supported
-if "eng_Latn" in supported_langs:
-    print("English (Latin script) is supported!")
-```
-
-Languages follow the format `{language_code}_{script}`, for example `eng_Latn` - English (Latin script), `cmn_Hans` - Mandarin Chinese (Simplified), ...
-
----
-
-## Training
-
-To further finetune the released checkpoints on your own data, use our [data preparation guide](/workflows/dataprep/README.md) followed by the [finetuning recipe guide](/workflows/recipes/wav2vec2/asr/README.md).
-
----
-
-## Citation
-
-**BibTeX:**
-
-```bibtex
-@misc{omnilingualasr2025,
-  title={{Omnilingual ASR}: Open-Source Multilingual Speech Recognition for 1600+ Languages},
-  author={{Omnilingual ASR Team} and Keren, Gil and Kozhevnikov, Artyom and Meng, Yen and Ropers, Christophe and Setzler, Matthew and Wang, Skyler and Adebara, Ife and Auli, Michael and Can, Balioglu and Chan, Kevin and Cheng, Chierh and Chuang, Joe and Droof, Caley and Duppenthaler, Mark and Duquenne, Paul-Ambroise and Erben, Alexander and Gao, Cynthia and Mejia Gonzalez, Gabriel and Lyu, Kehan and Miglani, Sagar and Pratap, Vineel and Sadagopan, Kaushik Ram and Saleem, Safiyyah and Turkatenko, Arina and Ventayol-Boada, Albert and Yong, Zheng-Xin and Chung, Yu-An and Maillard, Jean and Moritz, Rashel and Mourachko, Alexandre and Williamson, Mary and Yates, Shireen},
-  year={2025},
-  url={https://ai.meta.com/research/publications/omnilingual-asr-open-source-multilingual-speech-recognition-for-1600-languages/},
-}
-```
-
-* **Developed by:** Meta AI / Omnilingual ASR Team([GitHub][1])
-* **Model type:** End-to-end automatic speech recognition model (wav2vec2-style encoder with CTC head / encoder-decoder, depending on checkpoint).
-* **Language(s) (NLP):** 1,600+ languages overall in Omnilingual ASR; this corpus release specifically covers **348 under-served languages** across many writing systems (Latin, Arabic, Devanagari, etc.).([GitHub][1])
-* **License:** Apache-2.0 (for the model and code), CC-BY-4.0 for the `facebook/omnilingual-asr-corpus` dataset.([GitHub][1])
-
----
-
-[1]: https://github.com/facebookresearch/omnilingual-asr?tab=readme-ov-file "GitHub - facebookresearch/omnilingual-asr: Omnilingual ASR Open-Source Multilingual SpeechRecognition for 1600+ Languages"
-[2]: https://huggingface.co/datasets/facebook/omnilingual-asr-corpus/blob/main/README.md "README.md · facebook/omnilingual-asr-corpus at main"
-[3]: https://huggingface.co/datasets/facebook/omnilingual-asr-corpus?utm_source=chatgpt.com "facebook/omnilingual-asr-corpus · Datasets at ..."
-[4]: https://venturebeat.com/ai/meta-returns-to-open-source-ai-with-omnilingual-asr-models-that-can?utm_source=chatgpt.com "Meta returns to open source AI with Omnilingual ASR ..."
-[5]: https://huggingface.co/spaces/facebook/omniasr-transcriptions?utm_source=chatgpt.com "Omnilingual ASR Media Transcription"
-[6]: https://huggingface.co/collections/bezzam/omnilingual-asr-1-600-languages?utm_source=chatgpt.com "Omnilingual ASR (1600+ Languages) - a bezzam Collection"
-
-
+License: Apache-2.0, same as the original release.
