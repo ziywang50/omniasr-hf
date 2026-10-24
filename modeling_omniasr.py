@@ -222,17 +222,33 @@ class OmniAsrModel(OmniAsrPreTrainedModel):
     def get_input_embeddings(self):
         return self.language_model.embed_tokens
 
-    def get_audio_features(self, input_features, language_ids=None, return_dict=False, **kwargs):
-        """One clip at a time (the encoder has no padding mask).
-        Returns a list of [N_i + 2, hidden]: audio frames, LID marker, language."""
+    def get_audio_features(self, input_features, language_ids=None, input_features_mask=None,
+                           return_dict=False, **kwargs):
+        """Returns one [N_i + 2, hidden] tensor per clip: audio frames, LID marker, language.
+
+        Each clip is cropped to its true length (input_features_mask) and encoded on
+        its own, because the encoder has no padding mask. input_features may be a
+        [B, T] tensor or a list of clips (the vLLM backend can pass either).
+        """
         if language_ids is None:
             raise ValueError("language_ids is required (produced by OmniASRProcessor)")
-        if input_features.dim() == 1:
-            input_features = input_features[None]
+        if isinstance(input_features, torch.Tensor):
+            if input_features.dim() == 1:
+                input_features = input_features[None]
+            clips = list(input_features)
+        else:
+            clips = [f.reshape(-1) for f in input_features]
+        if input_features_mask is None:
+            lengths = [c.shape[-1] for c in clips]
+        else:
+            if isinstance(input_features_mask, torch.Tensor) and input_features_mask.dim() == 1:
+                input_features_mask = input_features_mask[None]
+            lengths = [int(m.sum()) for m in input_features_mask]
+
         stacking = self.config.encoder_stacking
         outputs = []
-        for i, wav in enumerate(input_features):
-            x = self.audio_tower(wav[None])                       # [1, T, E]
+        for i, wav in enumerate(clips):
+            x = self.audio_tower(wav[: lengths[i]][None])        # [1, T, E]
             if stacking > 1:
                 pad = (-x.size(1)) % stacking
                 if pad:
@@ -246,13 +262,14 @@ class OmniAsrModel(OmniAsrPreTrainedModel):
             return BaseModelOutputWithPooling(pooler_output=torch.cat(outputs, dim=0))
         return outputs
 
-    def forward(self, input_ids=None, input_features=None, language_ids=None,
+    def forward(self, input_ids=None, input_features=None, language_ids=None, input_features_mask=None,
                 attention_mask=None, position_ids=None, past_key_values=None,
                 inputs_embeds=None, cache_position=None, use_cache=None, **kwargs):
         if inputs_embeds is None:
             inputs_embeds = self.language_model.embed_tokens(input_ids)
         if input_features is not None:
-            audio = torch.cat(self.get_audio_features(input_features, language_ids), dim=0)
+            audio = torch.cat(self.get_audio_features(
+                input_features, language_ids, input_features_mask=input_features_mask), dim=0)
             mask = input_ids == self.config.pad_token_id          # audio placeholder slots
             if int(mask.sum()) != audio.shape[0]:
                 raise ValueError(f"{int(mask.sum())} placeholder tokens but "
@@ -280,12 +297,13 @@ class OmniAsrForConditionalGeneration(OmniAsrPreTrainedModel, GenerationMixin):
     def get_audio_features(self, input_features, language_ids=None, **kwargs):
         return self.model.get_audio_features(input_features, language_ids, **kwargs)
 
-    def forward(self, input_ids=None, input_features=None, language_ids=None,
+    def forward(self, input_ids=None, input_features=None, language_ids=None, input_features_mask=None,
                 attention_mask=None, position_ids=None, past_key_values=None,
                 inputs_embeds=None, cache_position=None, use_cache=None,
                 logits_to_keep=0, **kwargs):
         out = self.model(
             input_ids=input_ids, input_features=input_features, language_ids=language_ids,
+            input_features_mask=input_features_mask,
             attention_mask=attention_mask, position_ids=position_ids,
             past_key_values=past_key_values, inputs_embeds=inputs_embeds,
             cache_position=cache_position, use_cache=use_cache, **kwargs,
@@ -295,11 +313,13 @@ class OmniAsrForConditionalGeneration(OmniAsrPreTrainedModel, GenerationMixin):
         logits = self.lm_head(hidden[:, keep, :])
         return CausalLMOutputWithPast(logits=logits, past_key_values=out.past_key_values)
 
-    def prepare_inputs_for_generation(self, *args, input_features=None, language_ids=None, **kwargs):
+    def prepare_inputs_for_generation(self, *args, input_features=None, language_ids=None,
+                                      input_features_mask=None, **kwargs):
         model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
         cache = model_inputs.get("past_key_values")
         first_step = cache is None or not hasattr(cache, "get_seq_length") or cache.get_seq_length() == 0
         if first_step:   # audio only on the prefill step; later steps reuse the KV cache
             model_inputs["input_features"] = input_features
             model_inputs["language_ids"] = language_ids
+            model_inputs["input_features_mask"] = input_features_mask
         return model_inputs

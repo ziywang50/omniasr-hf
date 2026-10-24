@@ -16,7 +16,7 @@ def main():
     )
     audio, sr = sf.read("/root/autodl-tmp/bench_audio/000.wav", dtype="float32")
     out = llm.generate(
-        {"prompt": "<pad>", "multi_modal_data": {"audio": (audio, sr)}},
+        {"prompt": "<pad><s>", "multi_modal_data": {"audio": (audio, sr)}},
         SamplingParams(temperature=0.0, max_tokens=256),
     )
     print("OUTPUT:", out[0].outputs[0].text)
